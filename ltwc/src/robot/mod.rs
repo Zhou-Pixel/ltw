@@ -190,7 +190,7 @@ impl Robot {
                     .expect("error dec data");
                 let js = serde_json::from_slice::<packet::NewConnection>(&dec_data)
                     .expect("err js format");
-                Robot::handle_new_connection(&js);
+                Robot::handle_new_connection(ser_key.as_ref().unwrap(), js);
             }
             _ => {}
         }
@@ -235,7 +235,8 @@ impl Robot {
     //         }
     //     }
     // }
-    fn handle_new_connection(detail: &NewConnection) {
+    fn handle_new_connection(pub_key : &RsaPublicKey, detail: NewConnection) {
+        let cloned = pub_key.clone();
         if detail.procotol == "tcp" {
             let port = detail.port;
             tokio::spawn(async move {
@@ -253,7 +254,7 @@ impl Robot {
                                     // let mut rng = rand::thread_rng();
 
                                     // task.notify_server()
-                                    match task.notify_server(rand::random::<u32>()).await {
+                                    match task.notify_server(cloned, detail.rnum).await {
                                         Ok(_) => {}
                                         Err(_) => return,
                                     }

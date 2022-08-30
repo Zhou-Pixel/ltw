@@ -38,7 +38,7 @@ impl TcpTask {
         // self.local_addr = addr.to_string();
         Ok(())
     }
-    pub async fn notify_server(&mut self, rnum : u32) -> std::result::Result<(), String> {
+    pub async fn notify_server(&mut self, server_key : rsa::RsaPublicKey, rnum : u32) -> std::result::Result<(), String> {
         if let None = self.real_port {
             Err("Connect local port first".to_string())
         } else if let None = self.converted_port {
@@ -46,12 +46,16 @@ impl TcpTask {
         } else {
             // let identify = "identify=recver||recv_port=".to_string() + &self.recv_port + "\r\n";
             // identify.push_str(&self.local_addr);
-            self.converted_port
-                .as_mut()
-                .unwrap()
-                .write_u64((header::ID_RECVER, rnum).to_header())
+            use crate::packet::RandNumber;
+            let js = serde_json::to_vec(&RandNumber { number : rnum}).expect("err to js");
+            let dec_data = server_key.encrypt(&mut rand::thread_rng(), PaddingScheme::PKCS1v15Encrypt, &js).expect("enc");
+            let socket = self.converted_port.as_mut().unwrap();
+                socket
+                .write_u64((header::ID_RECVER, dec_data.len() as u32).to_header())
                 .await
                 .expect("identify failed");
+            use rsa::*;
+            socket.write_all(&dec_data).await.expect("write error");
             Ok(())
         }
     }

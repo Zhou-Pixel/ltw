@@ -74,6 +74,12 @@ pub struct ListenConnections {
     pub connections : Vec<ListenConnection>    
 }
 
+
+#[derive(Deserialize, Serialize)]
+pub struct RandNumber {
+    pub number : u32,
+}
+
 // impl Packet {
 //     pub fn new() -> Self {
 //         Self {
