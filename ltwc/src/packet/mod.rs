@@ -37,10 +37,10 @@ pub mod header {
         ((cmd as u64) << 32) | size as u64
     }
 }
-pub struct Packet {
-    data: Vec<u8>,
-    len: usize,
-}
+// pub struct Packet {
+//     data: Vec<u8>,
+//     len: usize,
+// }
 
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize, Serialize)]
@@ -56,30 +56,47 @@ pub struct PacketKey {
     pub e : String,
 }
 
-
-impl Packet {
-    pub fn new() -> Self {
-        Self {
-            data: Vec::new(),
-            len: 0,
-        }
-    }
-    pub fn append_with_size(&mut self, other: &mut Vec<u8>, size: usize) {
-        self.len += size;
-        self.data.append(&mut other[0..size].to_vec());
-    }
-    pub fn append(&mut self, other: &mut Vec<u8>) {
-        self.len += other.len();
-        self.data.append(other);
-    }
-    pub fn clear(&mut self) {
-        self.data.clear();
-        self.len = 0;
-    }
-    pub fn len(&self) -> usize {
-        self.len
-    }
-    pub fn get_data(&self) -> &Vec<u8> {
-        &self.data
-    }
+#[derive(Deserialize, Serialize)]
+pub struct NewConnection {
+    pub procotol : String,
+    pub port : u32,
+    pub rnum : u32
 }
+
+#[derive(Deserialize, Serialize)]
+pub struct ListenConnection {
+    pub procotol : String,
+    pub port : u32,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct ListenConnections {
+    pub connections : Vec<ListenConnection>    
+}
+
+// impl Packet {
+//     pub fn new() -> Self {
+//         Self {
+//             data: Vec::new(),
+//             len: 0,
+//         }
+//     }
+//     pub fn append_with_size(&mut self, other: &mut Vec<u8>, size: usize) {
+//         self.len += size;
+//         self.data.append(&mut other[0..size].to_vec());
+//     }
+//     pub fn append(&mut self, other: &mut Vec<u8>) {
+//         self.len += other.len();
+//         self.data.append(other);
+//     }
+//     pub fn clear(&mut self) {
+//         self.data.clear();
+//         self.len = 0;
+//     }
+//     pub fn len(&self) -> usize {
+//         self.len
+//     }
+//     pub fn get_data(&self) -> &Vec<u8> {
+//         &self.data
+//     }
+// }

@@ -2,6 +2,7 @@ use std::io::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net;
 use log::{error, info};
+            use crate::packet::header::{self, ToHeader};
 // use std::io::Bytes::BytesMut;
 
 pub struct TcpTask {
@@ -37,18 +38,18 @@ impl TcpTask {
         // self.local_addr = addr.to_string();
         Ok(())
     }
-    pub async fn notify_server(&mut self) -> std::result::Result<(), String> {
+    pub async fn notify_server(&mut self, rnum : u32) -> std::result::Result<(), String> {
         if let None = self.real_port {
             Err("Connect local port first".to_string())
         } else if let None = self.converted_port {
             Err("Connect Server first!".to_string())
         } else {
-            let identify = "identify=recver||recv_port=".to_string() + &self.recv_port + "\r\n";
+            // let identify = "identify=recver||recv_port=".to_string() + &self.recv_port + "\r\n";
             // identify.push_str(&self.local_addr);
             self.converted_port
                 .as_mut()
                 .unwrap()
-                .write_all(identify.as_bytes())
+                .write_u64((header::ID_RECVER, rnum).to_header())
                 .await
                 .expect("identify failed");
             Ok(())
