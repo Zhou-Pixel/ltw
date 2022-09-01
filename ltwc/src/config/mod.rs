@@ -6,7 +6,7 @@ use serde::Serialize;
 use toml;
 use std::io::Read;
 
-use rsa::{PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey};
+use rsa::{RsaPublicKey, RsaPrivateKey};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Global {

@@ -1,8 +1,8 @@
 use std::io::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net;
-use log::{error, info};
-            use crate::packet::header::{self, ToHeader};
+use log::error;
+use crate::packet::header::{self, ToHeader};
 // use std::io::Bytes::BytesMut;
 
 pub struct TcpTask {
@@ -10,7 +10,7 @@ pub struct TcpTask {
     converted_port: Option<net::TcpStream>,
     // local_addr: String,
     // remote_addr: String,
-    recv_port : String
+    destination_port : u32
 }
 
 impl TcpTask {
@@ -46,8 +46,8 @@ impl TcpTask {
         } else {
             // let identify = "identify=recver||recv_port=".to_string() + &self.recv_port + "\r\n";
             // identify.push_str(&self.local_addr);
-            use crate::packet::RandNumber;
-            let js = serde_json::to_vec(&RandNumber { number : rnum}).expect("err to js");
+            use crate::packet::CheckInfo;
+            let js = serde_json::to_vec(&CheckInfo { number : rnum, port : self.destination_port}).expect("err to js");
             let dec_data = server_key.encrypt(&mut rand::thread_rng(), PaddingScheme::PKCS1v15Encrypt, &js).expect("enc");
             let socket = self.converted_port.as_mut().unwrap();
                 socket
@@ -121,13 +121,13 @@ impl TcpTask {
         // info!("connection(local addr :{}, convert addr: {}) down", self.local_addr, self.remote_addr);
         });
     }
-    pub fn new(recv_port : String) -> Self {
+    pub fn new(port : u32) -> Self {
         Self {
             real_port : None,
             converted_port : None,
             // local_addr : String::new(),
             // remote_addr : String::new()
-            recv_port
+            destination_port : port
         }
     }
 }

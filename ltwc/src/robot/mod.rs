@@ -245,7 +245,7 @@ impl Robot {
                 let connections = conf.connection.as_ref().unwrap_or(&mut empty);
                 for i in 0..connections.len() {
                     if connections[i].remote_port == port {
-                        let mut task = crate::task::TcpTask::new(port.to_string());
+                        let mut task = crate::task::TcpTask::new(port);
                         let addr = connections[i].local_ip.clone()
                             + &connections[i].local_port.to_string();
                         match task.connect_to_real_port(&addr).await {
@@ -353,7 +353,7 @@ impl Robot {
             let mut buf = vec![0u8; 4096];
 
             loop {
-                if next_packet_size == 0 {
+                if cmd == header::NOT_A_CMD {
                     // let mut buf = String::new();
                     match socket.read_u64().await {
                         Ok(n) => {
@@ -371,7 +371,7 @@ impl Robot {
                 } else {
                     // let mut tmp_buf = vec![0; 4 * 1024];
                     match socket.read_exact(&mut buf[0..next_packet_size]).await {
-                        Ok(0) => {
+                        Ok(0) if next_packet_size != 0 => {
                             break;
                         }
                         Ok(size) => {

@@ -217,6 +217,17 @@ dependencies = [
 [[package]]
 name = "ltws"
 version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "log",
+ "once_cell",
+ "rand",
+ "rsa",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+]
 
 [[package]]
 name = "memchr"

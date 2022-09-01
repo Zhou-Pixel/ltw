@@ -76,8 +76,9 @@ pub struct ListenConnections {
 
 
 #[derive(Deserialize, Serialize)]
-pub struct RandNumber {
+pub struct CheckInfo {
     pub number : u32,
+    pub port : u32,
 }
 
 // impl Packet {
