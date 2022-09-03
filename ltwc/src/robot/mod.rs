@@ -12,7 +12,7 @@ use crate::packet;
 use crate::packet::header::ToHeader;
 use crate::packet::header::{self, Header};
 use packet::NewConnection;
-use log::{error, info};
+use log::*;
 
 pub struct Robot {
     socket: Option<TcpStream>,
@@ -317,6 +317,15 @@ impl Robot {
             },
             None => { Ok(0) },
         }
+    }
+    async fn read_pakcet(steamer : &mut BufStream<&mut TcpStream>) -> io::Result<(Vec<u8>, u32)> {
+        let data = steamer.read_u64().await?;
+        let mut buf = vec![0; data.get_size() as usize];
+        if data.get_size() as usize != steamer.read_exact(&mut buf).await? {
+            warn!("not enough data");
+        }
+
+        Ok((buf, data.get_cmd()))
     }
     pub fn start(mut self) {
         tokio::spawn(async move {
