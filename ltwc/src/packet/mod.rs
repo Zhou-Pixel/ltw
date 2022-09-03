@@ -64,6 +64,13 @@ pub struct NewConnection {
 }
 
 #[derive(Deserialize, Serialize)]
+pub struct NewRecver {
+    pub procotol : String,
+    pub port : u32,
+    pub rnum : u32
+}
+
+#[derive(Deserialize, Serialize)]
 pub struct ListenConnection {
     pub procotol : String,
     pub port : u32,

@@ -46,8 +46,8 @@ impl TcpTask {
         } else {
             // let identify = "identify=recver||recv_port=".to_string() + &self.recv_port + "\r\n";
             // identify.push_str(&self.local_addr);
-            use crate::packet::CheckInfo;
-            let js = serde_json::to_vec(&CheckInfo { number : rnum, port : self.destination_port}).expect("err to js");
+            use crate::packet::NewRecver;
+            let js = serde_json::to_vec(&NewRecver { procotol : "tcp".to_string(), rnum, port : self.destination_port}).expect("err to js");
             let dec_data = server_key.encrypt(&mut rand::thread_rng(), PaddingScheme::PKCS1v15Encrypt, &js).expect("enc");
             let socket = self.converted_port.as_mut().unwrap();
                 socket
@@ -59,21 +59,22 @@ impl TcpTask {
             Ok(())
         }
     }
-    pub async fn start(mut self) {
-        if let None = self.real_port {
-            return;
-        } else if let None = self.converted_port {
-            match self.connect_to_server(None).await {
-                Ok(_) => {}
-                Err(_) => return,
-            }
-        }
+    pub fn start(mut self) {
 
         // use tokio::io::BufReader;
         // let bread = BufReader::new(remote);
 
         // remote.read_to
         tokio::spawn(async move {
+            if let None = self.real_port {
+                return;
+            } else if let None = self.converted_port {
+                match self.connect_to_server(None).await {
+                    Ok(_) => {}
+                    Err(_) => return,
+                }
+            }
+    
             let remote = self.converted_port.as_mut().unwrap();
             let local = self.real_port.as_mut().unwrap();
 

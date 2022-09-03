@@ -258,7 +258,7 @@ impl Robot {
                                         Ok(_) => {}
                                         Err(_) => return,
                                     }
-                                    task.start().await;
+                                    task.start();
                                     log::info!("new task start from remote port : {}", port);
                                 }
                                 Err(e) => {
