@@ -1,7 +1,5 @@
 use crate::config::{self, Config};
-use tokio::sync::MutexGuard;
 use tokio::{io::AsyncReadExt, io::AsyncWriteExt, io::BufStream, net::TcpStream};
-
 
 use std::io;
 use std::str::FromStr;
@@ -11,16 +9,37 @@ use rsa::{BigUint, PaddingScheme, PublicKey, PublicKeyParts, RsaPublicKey};
 use crate::packet;
 use crate::packet::header::ToHeader;
 use crate::packet::header::{self, Header};
-use packet::NewConnection;
 use log::*;
+use packet::NewConnection;
+
+pub type Streamer = BufStream<TcpStream>;
 
 pub struct Robot {
-    socket: Option<TcpStream>,
-    server_key: Option<RsaPublicKey>,
+    socket: Streamer,
+    server_key: Option<&'static RsaPublicKey>,
 }
 
 impl Robot {
-    pub async fn connect(&mut self, addr: Option<&str>) -> io::Result<()> {
+    pub async fn new() -> io::Result<Self> {
+        let socket = Robot::connect_to_server().await?;
+        let mut robot = Robot {
+            socket,
+            server_key: None,
+        };
+        robot.send_identify().await?;
+        Ok(robot)
+    }
+    async fn connect_to_server() -> io::Result<Streamer> {
+        let conf = Config::get_config(None);
+        let addr = conf.global.remote_ip.clone() + ":" + &conf.global.bind_port.to_string();
+        Ok(BufStream::new(TcpStream::connect(addr).await?))
+    }
+
+    async fn send_identify(&mut self) -> io::Result<()> {
+        self.socket.write_u64((header::ID_ROBOT, 0u32).to_header()).await
+    }
+
+    async fn reconnect_to_server(&mut self, addr: Option<&str>) -> io::Result<()> {
         let conf = Config::get_config(None);
         let addr = match addr {
             Some(addr) => addr.to_string(),
@@ -30,11 +49,12 @@ impl Robot {
                     + &conf.global.bind_port.to_string()
             }
         };
-        let mut socket = TcpStream::connect(&addr).await?;
-        socket
+        let socket = TcpStream::connect(&addr).await?;
+        let mut streamer = BufStream::new(socket);
+        streamer
             .write_u64((header::ID_ROBOT, 0u32).to_header())
             .await?;
-        self.socket = Some(socket);
+        self.socket = streamer;
 
         // if let Some(connection) = conf.connection.as_ref() {
         //     let mut obj = Map::new();
@@ -57,9 +77,6 @@ impl Robot {
     }
 
     async fn send_key(&mut self) -> io::Result<()> {
-        if let None = self.socket {
-            return Err(io::Error::from(io::ErrorKind::NotConnected));
-        }
         let key = config::RSAKey::get_key();
         // let mut obj = Map::new();
         // obj.insert("cmd".to_string(), Value::String("exchange_key".to_string()));
@@ -68,49 +85,51 @@ impl Robot {
             n: key.pub_key.n().to_string(),
             e: key.pub_key.e().to_string(),
         };
-        let key_js = serde_json::to_string(&key_js).expect("err js struct");
+        // debug!("key : {:#?}", key_js);
+        let key_js = serde_json::to_vec(&key_js).expect("err js struct");
         // keymap.insert("key", Value::String(key.pub_key));
-        let socket = self.socket.as_mut().unwrap();
-        socket
+        self.socket
             .write_u64((header::EXCHANGE_KEY, key_js.len() as u32).to_header())
             .await?;
-        socket.write_all(key_js.as_bytes()).await?;
+        self.socket.write_all(&key_js).await?;
+        self.socket.flush().await?;
         Ok(())
     }
 
-    async fn reconnect(mut self) {
+    async fn reconnect(&mut self) {
         let mut times = 0;
-            loop {
-                match self.connect(None).await {
-                    Ok(_) => {
-                        break;
-                    }
-                    Err(e) => {
-                        times += 1;
-                        info!("Reconnecting to server failed : {:#?} times : {}", e, times);
-                        let time;
-                        match times {
-                            0..=10 => {
-                                time = 1;
-                            }
-                            11..=100 => {
-                                time = 20;
-                            }
-                            101..=1000 => time = 60 * 2,
-                            _ => {
-                                time = 60 * 5;
-                            }
+        loop {
+            match self.reconnect_to_server(None).await {
+                Ok(_) => {
+                    break;
+                }
+                Err(e) => {
+                    times += 1;
+                    info!("Reconnecting to server failed : {:#?} times : {}", e, times);
+                    let time;
+                    match times {
+                        0..=10 => {
+                            time = 1;
                         }
-                        // let arr = [0u8; 8];
-                        // let i = arr.as_ptr() as *mut u64;
-                        use tokio::time::sleep;
-                        use std::time::Duration;
-                        sleep(Duration::from_secs(time)).await;
+                        11..=100 => {
+                            time = 20;
+                        }
+                        101..=1000 => time = 60 * 2,
+                        _ => {
+                            time = 60 * 5;
+                        }
                     }
+                    // let arr = [0u8; 8];
+                    // let i = arr.as_ptr() as *mut u64;
+                    use std::time::Duration;
+                    use tokio::time::sleep;
+                    sleep(Duration::from_secs(time)).await;
                 }
             }
-            self.start();
+        }
+        // self.start().await;
     }
+
     async fn send_encryptd_data(&mut self, data: &[u8], cmd: u32) -> io::Result<usize> {
         let enc_data;
 
@@ -143,45 +162,49 @@ impl Robot {
     }
 
     async fn send_raw_data(&mut self, data: &[u8], cmd: u32) -> io::Result<usize> {
-        match self.socket {
-            Some(ref mut socket) => {
-                socket
-                    .write_u64((cmd, data.len() as u32).to_header())
-                    .await?;
-                socket.write_all(data).await?;
-                Ok(data.len())
-            }
-            None => Err(io::Error::from(io::ErrorKind::NotConnected)),
-        }
+        self.socket
+            .write_u64((cmd, data.len() as u32).to_header())
+            .await?;
+        self.socket.write_all(data).await?;
+        Ok(8 + data.len())
     }
-    fn handle_raw_data(ser_key: &mut Option<RsaPublicKey>, data: &[u8], cmd: u32) {
+    fn handle_raw_data(&mut self, data: &[u8], cmd: u32) {
         // let js = String::new();
         let key = config::RSAKey::get_key();
         match cmd {
             header::EXCHANGE_KEY => {
-                match key.pri_key.decrypt(PaddingScheme::PKCS1v15Encrypt, data) {
-                    Ok(data) => match String::from_utf8(data) {
-                        Ok(ret) => {
-                            let server_key: packet::PacketKey =
-                                serde_json::from_str(ret.as_str()).expect("err format json");
-                            let server_key = RsaPublicKey::new(
-                                BigUint::from_str(&server_key.n).expect("key format"),
-                                BigUint::from_str(&server_key.e).expect("key format"),
-                            )
-                            .expect("key format");
-                            *ser_key = Some(server_key);
-                            info!("get the server key successfully");
-                        }
-                        Err(e) => {
-                            error!("not utf-8 msg :{:#?}", e);
-                            return;
-                        }
-                    },
-                    Err(e) => {
-                        error!("decrypt failed {}", e);
-                        return;
-                    }
-                };
+                let server_key : packet::PacketKey = serde_json::from_slice(data)
+                .expect("decrypt failed decryption error");
+                let server_key = RsaPublicKey::new(
+                    BigUint::from_str(&server_key.n).expect("key format"),
+                    BigUint::from_str(&server_key.e).expect("key format"),
+                )
+                .expect("key format");
+                self.server_key = Some(Box::leak(Box::new(server_key)));
+                
+                // match key.pri_key.decrypt(PaddingScheme::PKCS1v15Encrypt, data) {
+                //     Ok(data) => match String::from_utf8(data) {
+                //         Ok(ret) => {
+                //             let server_key: packet::PacketKey =
+                //                 serde_json::from_str(ret.as_str()).expect("err format json");
+                //             let server_key = RsaPublicKey::new(
+                //                 BigUint::from_str(&server_key.n).expect("key format"),
+                //                 BigUint::from_str(&server_key.e).expect("key format"),
+                //             )
+                //             .expect("key format");
+                //             self.server_key = Some(Box::leak(Box::new(server_key)));
+                //             info!("get the server key successfully");
+                //         }
+                //         Err(e) => {
+                //             error!("not utf-8 msg :{:#?}", e);
+                //             return;
+                //         }
+                //     },
+                //     Err(e) => {
+                //         error!("decrypt failed {}", e);
+                //         return;
+                //     }
+                // };
             }
             header::NEW_CONNECTION => {
                 let dec_data = key
@@ -190,7 +213,7 @@ impl Robot {
                     .expect("error dec data");
                 let js = serde_json::from_slice::<packet::NewConnection>(&dec_data)
                     .expect("err js format");
-                Robot::handle_new_connection(ser_key.as_ref().unwrap(), js);
+                self.handle_new_connection(js);
             }
             _ => {}
         }
@@ -235,41 +258,34 @@ impl Robot {
     //         }
     //     }
     // }
-    fn handle_new_connection(pub_key : &RsaPublicKey, detail: NewConnection) {
-        let cloned = pub_key.clone();
+    fn handle_new_connection(&self, detail: NewConnection) {
         if detail.procotol == "tcp" {
             let port = detail.port;
+            let key = self.server_key.unwrap();
             tokio::spawn(async move {
                 let conf = Config::get_config(None);
                 let mut empty = Vec::new();
                 let connections = conf.connection.as_ref().unwrap_or(&mut empty);
-                for i in 0..connections.len() {
-                    if connections[i].remote_port == port {
-                        let mut task = crate::task::TcpTask::new(port);
-                        let addr = connections[i].local_ip.clone()
-                            + &connections[i].local_port.to_string();
-                        match task.connect_to_real_port(&addr).await {
-                            Ok(_) => match task.connect_to_server(None).await {
-                                Ok(_) => {
-                                    // let mut rng = rand::thread_rng();
-
-                                    // task.notify_server()
-                                    match task.notify_server(cloned, detail.rnum).await {
-                                        Ok(_) => {}
-                                        Err(_) => return,
-                                    }
-                                    task.start();
-                                    log::info!("new task start from remote port : {}", port);
+                for i in connections.iter() {
+                    if i.remote_port == port {
+                        let local_addr = i.local_ip.clone() + ":" + &i.local_port.to_string();
+                        let remote_addr = conf.global.remote_ip.clone()
+                            + ":"
+                            + &conf.global.bind_port.to_string();
+                        match crate::task::TcpTask::new(
+                            &local_addr,
+                            Some(&remote_addr),
+                            i.remote_port,
+                            detail.rnum,
+                        )
+                        .await
+                        {
+                            Ok(mut task) => {
+                                if let Ok(_) = task.notify_server(key).await {
+                                    task.start().await;
                                 }
-                                Err(e) => {
-                                    error!("connect to server failed {:#?}", e);
-                                    return;
-                                }
-                            },
-                            Err(e) => {
-                                error!("connect to real failed {:#?}", e);
-                                return;
                             }
+                            Err(_) => break,
                         }
                         break;
                     }
@@ -278,9 +294,10 @@ impl Robot {
         }
     }
     async fn exchange_key(&mut self) -> io::Result<()> {
-        
+        debug!("start sending key");
         self.send_key().await?;
-        let mut socket = BufStream::new(self.socket.as_mut().unwrap());
+        debug!("send_key finish");
+        let socket = &mut self.socket;
         let ret = socket.read_u64().await?;
 
         match ret.get_cmd() {
@@ -288,135 +305,92 @@ impl Robot {
                 let mut buf = vec![0; ret.get_size() as usize];
                 let size = socket.read_exact(&mut buf).await?;
                 // socket.read
-                Robot::handle_raw_data(&mut self.server_key, &buf[0..size], ret.get_cmd());
+                self.handle_raw_data(&buf[0..size], ret.get_cmd());
             }
 
-            _ => {return Err(io::Error::from(io::ErrorKind::InvalidData))}
-        }
-        ;
+            _ => return Err(io::Error::from(io::ErrorKind::InvalidData)),
+        };
 
         Ok(())
     }
     async fn send_listen_ports(&mut self) -> io::Result<usize> {
         let conf = Config::get_config(None);
-        
+
         match conf.connection.as_ref() {
             Some(conntions) => {
                 // let con =  packet::ListenConnection {connections : Vec::new()};
                 let mut cons = Vec::new();
-                for i in 0..conntions.len() {
+                for i in conntions.iter() {
                     let con = packet::ListenConnection {
-                        procotol : conntions[i].protocol.clone(),
-                        port : conntions[i].remote_port
+                        procotol: i.protocol.clone(),
+                        port: i.remote_port,
                     };
                     cons.push(con);
                     // conntions[i].
                 }
-                let data = serde_json::to_vec(&packet::ListenConnections {connections : cons}).expect("msg");
-                self.send_encryptd_data(&data, header::LTWC_PORTS).await
-            },
-            None => { Ok(0) },
+                let data = serde_json::to_vec(&packet::ListenConnections { connections: cons })
+                    .expect("msg");
+                let size = self.send_encryptd_data(&data, header::LTWC_PORTS).await?;
+                self.socket.flush().await?;
+                Ok(size)
+            }
+            None => Ok(0),
         }
     }
-    async fn read_pakcet(steamer : &mut BufStream<&mut TcpStream>) -> io::Result<(Vec<u8>, u32)> {
-        let data = steamer.read_u64().await?;
+    async fn read_pakcet(&mut self) -> io::Result<(Vec<u8>, u32)> {
+        let streamer = &mut self.socket;
+        let data = streamer.read_u64().await?;
         let mut buf = vec![0; data.get_size() as usize];
-        if data.get_size() as usize != steamer.read_exact(&mut buf).await? {
+        if data.get_size() as usize != streamer.read_exact(&mut buf).await? {
             warn!("not enough data");
         }
 
         Ok((buf, data.get_cmd()))
     }
-    pub fn start(mut self) {
-        tokio::spawn(async move {
-            if let None = self.socket {
-                return;
-            }
-            // let mut is_fist = true;
-            let mut next_packet_size: usize = 0;
-            // let mut buf = packet::Packet::new();
+    async fn send_password(&mut self) -> io::Result<()> {
+        let password = Config::get_config(None).global.password.clone();
+        let js = serde_json::to_vec(&packet::Password { password }).unwrap();
+        let dec_data = self
+            .server_key
+            .unwrap()
+            .encrypt(&mut rand::thread_rng(), PaddingScheme::PKCS1v15Encrypt, &js)
+            .unwrap();
+        self.send_raw_data(&dec_data, header::PASSWORD).await?;
 
-            let mut cmd: u32 = header::NOT_A_CMD;
-            // self.send_key().await.expect("error");
+        Ok(())
+    }
+    pub async fn start(mut self) {
+        debug!("robot start");
+        if let Err(e) = self.exchange_key().await {
+            error!("get key error {:#?}", e);
+            return;
+        }
+        if let Err(e) = self.send_password().await {
+            error!("send password failed {}", e);
+            return;
+        }
+        if let Err(e) = self.send_listen_ports().await {
+            error!("get key error {:#?}", e);
+            return;
+        }
+        
+        info!("start successfully");
 
-            match self.exchange_key().await {
-                Ok(_) => {},
-                Err(e) => {
-                    error!("get key error {:#?}", e);
-                    return;
-                },
-            }
-            match self.send_listen_ports().await {
-                Ok(_) => {
-
-                },
-                Err(e) => {
-                    
-                }
-            }
-
-            let mut socket = BufStream::new(self.socket.as_mut().unwrap());
-
-            // let size = socket.read_u64().await.expect("err read u64");
-            
-            let mut buf = vec![0u8; 4096];
-
-            loop {
-                if cmd == header::NOT_A_CMD {
-                    // let mut buf = String::new();
-                    match socket.read_u64().await {
-                        Ok(n) => {
-                            next_packet_size = n.get_size() as usize;
-                            cmd = n.get_cmd();
-                            if buf.len() < next_packet_size {
-                                buf.resize(next_packet_size, 0);
-                            }
-                        }
-                        Err(e) => {
-                            error!("read error:{:#?}", e);
-                            break;
-                        }
+        loop {
+            match self.read_pakcet().await {
+                Ok(data) => {
+                    if data.1 == header::NOT_A_CMD || data.0.len() == 0 {
+                        self.reconnect().await;
                     }
-                } else {
-                    // let mut tmp_buf = vec![0; 4 * 1024];
-                    match socket.read_exact(&mut buf[0..next_packet_size]).await {
-                        Ok(0) if next_packet_size != 0 => {
-                            break;
-                        }
-                        Ok(size) => {
-                            // buf.append_with_size(&mut tmp_buf, size);
-                            // if buf.len() == next_packet_size {
-                            //     if is_fist {
-                            //         is_fist = false;
-                            //     } else {
-                            //         Robot::handle_raw_data(
-                            //             &mut self.server_key,
-                            //             buf.get_data(),
-                            //             cmd,
-                            //         );
-                            //     }
-                            //     next_packet_size = 0;
-                            //     cmd = header::NOT_A_CMD;
-                            //     buf.clear();
-                            // }
-                            if size != next_packet_size {
-                                error!("not enough size read");
-                                break;
-                            } else {
-                                Robot::handle_raw_data(&mut self.server_key, &buf[0..size], cmd);
-                                next_packet_size = 0;
-                            }
-                        }
-                        Err(e) => {
-                            error!("read error:{:#?}", e);
-                            break;
-                        }
-                    }
-                }
-            }
 
-            self.reconnect().await;
-            
-        });
+                    self.handle_raw_data(&data.0, data.1);
+                }
+                Err(e) => {
+                    error!("read error reconnecting {}", e);
+                    self.reconnect().await;
+                }
+            };
+        }
+
     }
 }

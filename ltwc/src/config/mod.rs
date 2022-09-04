@@ -58,7 +58,7 @@ impl Config {
 
 
         CONFIG.get_or_init(||{
-            let path = path.unwrap_or("./ntlc.toml".to_string());
+            let path = path.unwrap_or("./ltwc.toml".to_string());
             let mut file = File::open(path.clone()).expect("Open file failed!");
             let mut buf = String::new();
             file.read_to_string(&mut buf).expect(format!("Read file :{} failed", path).as_str());

@@ -1,5 +1,4 @@
 pub mod header;
-use std::convert::From;
 
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize, Serialize)]
@@ -9,7 +8,7 @@ pub struct ConnectionInfo {
 }
 
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct PacketKey {
     pub n : String,
     pub e : String,
@@ -19,6 +18,7 @@ pub struct PacketKey {
 pub struct NewConnection {
     pub procotol : String,
     pub port : u32,
+    pub rnum : u32
 }
 
 #[derive(Deserialize, Serialize)]
@@ -48,32 +48,4 @@ pub struct NewRecver {
     pub procotol : String,
     pub port : u32,
     pub rnum : u32
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Procotol {
-    Tcp,
-    Udp,
-    Unkonwn
-}
-
-
-impl std::convert::From<&str> for Procotol {
-    fn from(s : &str) -> Self {
-        match s {
-            "tcp" => Procotol::Tcp,
-            "udp" => Procotol::Udp,
-            _ => Procotol::Unkonwn
-        }
-    }
-}
-
-impl From<&String> for Procotol {
-    fn from(s : &String) -> Self {
-        match s.as_str() {
-            "tcp" => Procotol::Tcp,
-            "udp" => Procotol::Udp,
-            _ => Procotol::Unkonwn
-        }
-    }
 }
