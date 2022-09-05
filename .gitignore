@@ -1,2 +1,6 @@
 /target
 /Cargo.lock
+/ltws/ltws_log.txt
+/ltws/ltws.toml
+/ltwc/ltwc.toml
+/ltwc/ltwc_log.txt

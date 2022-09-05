@@ -93,7 +93,7 @@ impl Manager {
     pub async fn listen(self) {
         let conf = Config::get_config(None);
         let socket =
-            net::TcpListener::bind("127.0.0.1:".to_string() + &conf.global.bind_port.to_string())
+            net::TcpListener::bind("0.0.0.0:".to_string() + &conf.global.bind_port.to_string())
                 .await
                 .expect("bind port error");
         info!("manager start listening");

@@ -1,6 +1,6 @@
 [global]
 remote_ip = "127.0.0.1"
-bind_port = 7000
+bind_port = 6543
 password = "123456"
 
 [[connection]]
@@ -9,4 +9,4 @@ name = "test"
 protocol = "tcp"
 local_ip = "127.0.0.1"
 local_port = 8080
-remote_port = 8888
+remote_port = 8080
