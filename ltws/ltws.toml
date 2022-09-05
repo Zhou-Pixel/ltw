@@ -1,0 +1,5 @@
+[global]
+password = "123456"
+bind_port = 7000
+
+
