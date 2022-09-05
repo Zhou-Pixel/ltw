@@ -517,7 +517,7 @@ struct TListener {
 impl TListener {
     fn start(self) {
         tokio::spawn(async move {
-            let socket = net::TcpListener::bind("127.0.0.1".to_string() + ":" + &self.port.to_string())
+            let socket = net::TcpListener::bind("0.0.0.0:".to_string() + &self.port.to_string())
                 .await
                 .expect("bind err");
             debug!("server : {} is listening ", self.port);
