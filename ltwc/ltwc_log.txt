@@ -1,3 +1,0 @@
-[2022-09-05T14:14:19Z TRACE mio::poll] registering event source with poller: token=Token(1), interests=READABLE | WRITABLE
-[2022-09-05T14:14:19Z TRACE mio::poll] deregistering event source from poller
-[2022-09-05T14:14:19Z TRACE mio::poll] deregistering event source from poller

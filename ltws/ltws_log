@@ -1,6 +1,0 @@
-[2022-09-04T13:27:18Z TRACE ltws] test log
-[2022-09-04T13:27:18Z INFO  ltws] test log
-[2022-09-04T13:27:18Z DEBUG ltws] test_log
-[2022-09-04T13:27:18Z ERROR ltws] test log
-[2022-09-04T13:27:18Z WARN  ltws] test log
-[2022-09-04T13:27:18Z TRACE mio::poll] deregistering event source from poller
