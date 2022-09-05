@@ -1,6 +1,6 @@
 use super::robot::Streamer;
 use crate::packet::header::{self, ToHeader};
-use log::error;
+use log::*;
 use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufStream};
 use tokio::net;
@@ -84,12 +84,15 @@ impl TcpTask {
         loop {
             tokio::select! {
                 ret = remote.read(&mut remote_buf) => {
+                    debug!("remote read");
                     match ret {
                         Ok(0) => break,
                         Ok(n) => {
                             if let Result::Err(e) = local.write_all(&remote_buf[0..n]).await {
                                 error!("write to local error {:#?}", e);
                                 break;
+                            } else {
+                                local.flush().await.unwrap_or_else(|e| error!("{}", e));
                             }
                         },
                         Err(e) => {
@@ -99,12 +102,15 @@ impl TcpTask {
                     }
                 },
                 ret = local.read(&mut local_buf) => {
+                    debug!("local read");
                     match ret {
                         Ok(0) => break,
                         Ok(n) => {
                             if let Result::Err(e) = remote.write_all(&local_buf[0..n]).await {
                                 error!("write to server error {:#?}", e);
                                 break;
+                            } else {
+                                remote.flush().await.unwrap_or_else(|e| error!("{}", e));
                             }
                         },
                         Err(e) => {

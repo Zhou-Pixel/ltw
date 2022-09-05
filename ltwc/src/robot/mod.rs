@@ -166,6 +166,7 @@ impl Robot {
             .write_u64((cmd, data.len() as u32).to_header())
             .await?;
         self.socket.write_all(data).await?;
+        self.socket.flush().await?;
         Ok(8 + data.len())
     }
     fn handle_raw_data(&mut self, data: &[u8], cmd: u32) {
@@ -330,6 +331,7 @@ impl Robot {
                 }
                 let data = serde_json::to_vec(&packet::ListenConnections { connections: cons })
                     .expect("msg");
+                debug!("ports = {:?}", String::from_utf8_lossy(&data));
                 let size = self.send_encryptd_data(&data, header::LTWC_PORTS).await?;
                 self.socket.flush().await?;
                 Ok(size)
