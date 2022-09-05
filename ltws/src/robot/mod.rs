@@ -520,15 +520,17 @@ impl TListener {
             let socket = net::TcpListener::bind("127.0.0.1".to_string() + ":" + &self.port.to_string())
                 .await
                 .expect("bind err");
+            debug!("server : {} is listening ", self.port);
             loop {
                 tokio::select! {
                     ret = socket.accept() => {
                         match ret {
                             Ok(client) => {
+                                debug!("get new connection");
                                 let rnum = rand::random::<u32>();
                                 debug!("create rnum {}", rnum);
                                 match self.sender.send(NewConnection::new(BufStream::new(client.0), self.port, "tcp".to_string(), rnum)) {
-                                    Ok(_) => {},
+                                    Ok(_) => {debug!("send socket finished");},
                                     Err(e) => {
                                         warn!("Tcplistener is going down :{}", e);
                                         break;
