@@ -372,7 +372,7 @@ impl Robot {
             return;
         }
         if let Err(e) = self.send_listen_ports().await {
-            error!("get key error {:#?}", e);
+            error!("send listen ports error {:#?}", e);
             return;
         }
         
