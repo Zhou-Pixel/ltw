@@ -204,6 +204,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "log",
+ "ltwr",
  "once_cell",
  "rand",
  "rsa",
@@ -214,11 +215,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ltwr"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ltws"
 version = "0.1.0"
 dependencies = [
  "env_logger",
  "log",
+ "ltwr",
  "once_cell",
  "rand",
  "rsa",

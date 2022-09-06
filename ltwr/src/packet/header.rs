@@ -5,6 +5,7 @@ pub const ID_ROBOT : u32 = 4;
 pub const LTWC_PORTS : u32 = 5;
 pub const EXCHANGE_KEY : u32 = 6;
 pub const PASSWORD : u32 = 7;
+pub const HEARTBEAT : u32 = 8;
 pub trait Header {
     fn get_cmd(&self) -> u32;
     fn get_size(&self) -> u32;

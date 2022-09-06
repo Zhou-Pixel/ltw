@@ -6,9 +6,9 @@ use std::str::FromStr;
 
 use rsa::{BigUint, PaddingScheme, PublicKey, PublicKeyParts, RsaPublicKey};
 
-use crate::packet;
-use crate::packet::header::ToHeader;
-use crate::packet::header::{self, Header};
+use ltwr::packet;
+use ltwr::packet::header::ToHeader;
+use ltwr::packet::header::{self, Header};
 use log::*;
 use packet::NewConnection;
 
@@ -17,6 +17,7 @@ pub type Streamer = BufStream<TcpStream>;
 pub struct Robot {
     socket: Streamer,
     server_key: Option<&'static RsaPublicKey>,
+    
 }
 
 impl Robot {
@@ -101,6 +102,18 @@ impl Robot {
         loop {
             match self.reconnect_to_server(None).await {
                 Ok(_) => {
+                    if let Err(e) = self.exchange_key().await {
+                        error!("get key error {:#?}", e);
+                        continue;
+                    }
+                    if let Err(e) = self.send_password().await {
+                        error!("send password failed {}", e);
+                        continue;
+                    }
+                    if let Err(e) = self.send_listen_ports().await {
+                        error!("send listen ports error {:#?}", e);
+                        continue;
+                    }
                     break;
                 }
                 Err(e) => {

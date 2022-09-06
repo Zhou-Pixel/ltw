@@ -49,3 +49,7 @@ pub struct NewRecver {
     pub port : u32,
     pub rnum : u32
 }
+
+pub struct HeartBeat {
+    pub time : String,
+}

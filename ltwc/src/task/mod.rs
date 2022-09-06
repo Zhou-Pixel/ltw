@@ -1,5 +1,5 @@
 use super::robot::Streamer;
-use crate::packet::header::{self, ToHeader};
+use ltwr::packet::header::{self, ToHeader};
 use log::*;
 use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufStream};
@@ -54,7 +54,7 @@ impl TcpTask {
     pub async fn notify_server(&mut self, server_key: &rsa::RsaPublicKey) -> io::Result<()> {
         // let identify = "identify=recver||recv_port=".to_string() + &self.recv_port + "\r\n";
         // identify.push_str(&self.local_addr);
-        use crate::packet::NewRecver;
+        use ltwr::packet::NewRecver;
         let js = serde_json::to_vec(&NewRecver {
             procotol: "tcp".to_string(),
             rnum: self.rnum,
@@ -80,6 +80,7 @@ impl TcpTask {
         let mut local_buf = vec![0; 8 * 1024];
         let mut remote_buf = vec![0; 8 * 1024];
         // let c = remote;
+        
 
         loop {
             tokio::select! {
@@ -91,8 +92,11 @@ impl TcpTask {
                             if let Result::Err(e) = local.write_all(&remote_buf[0..n]).await {
                                 error!("write to local error {:#?}", e);
                                 break;
-                            } else {
+                            } else if n < remote_buf.len() {
                                 local.flush().await.unwrap_or_else(|e| error!("{}", e));
+                            }
+                            if n == remote_buf.len() && n < 1024 * 1024 * 8 {
+                                remote_buf.resize(2 * n, 0);
                             }
                         },
                         Err(e) => {
@@ -109,8 +113,12 @@ impl TcpTask {
                             if let Result::Err(e) = remote.write_all(&local_buf[0..n]).await {
                                 error!("write to server error {:#?}", e);
                                 break;
-                            } else {
+                            } else if n < local_buf.len() {
                                 remote.flush().await.unwrap_or_else(|e| error!("{}", e));
+                            }
+
+                            if n == local_buf.len() && n < 1024 * 1024 * 8 {
+                                local_buf.resize(2 * n, 0);
                             }
                         },
                         Err(e) => {

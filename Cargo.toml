@@ -2,6 +2,7 @@
 
 members = [
     "ltwc",
-    "ltws"
+    "ltws",
+    "ltwr"
 ]
 
