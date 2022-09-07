@@ -50,6 +50,7 @@ pub struct NewRecver {
     pub rnum : u32
 }
 
+#[derive(Debug, Deserialize, Serialize)]
 pub struct HeartBeat {
     pub time : String,
 }

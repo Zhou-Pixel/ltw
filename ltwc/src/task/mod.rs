@@ -80,8 +80,9 @@ impl TcpTask {
         let mut local_buf = vec![0; 8 * 1024];
         let mut remote_buf = vec![0; 8 * 1024];
         // let c = remote;
+       
+        // std::mem::replace(dest, src)
         
-
         loop {
             tokio::select! {
                 ret = remote.read(&mut remote_buf) => {

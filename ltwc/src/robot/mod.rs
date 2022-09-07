@@ -1,9 +1,9 @@
 use crate::config::{self, Config};
 use tokio::{io::AsyncReadExt, io::AsyncWriteExt, io::BufStream, net::TcpStream};
-
+use chrono::*;
 use std::io;
 use std::str::FromStr;
-
+use ltwr::error::LtwError;
 use rsa::{BigUint, PaddingScheme, PublicKey, PublicKeyParts, RsaPublicKey};
 
 use ltwr::packet;
@@ -182,96 +182,39 @@ impl Robot {
         self.socket.flush().await?;
         Ok(8 + data.len())
     }
-    fn handle_raw_data(&mut self, data: &[u8], cmd: u32) {
+    fn handle_raw_data(&mut self, data: &[u8], cmd: u32) -> Result<(), LtwError> {
         // let js = String::new();
+        // let invalid : io::Error = io::Error::from(io::ErrorKind::InvalidData);
+        // let err3 : LtwError = LtwError::from(io::Error::from(io::ErrorKind::InvalidData));
         let key = config::RSAKey::get_key();
+        if cmd == header::EXCHANGE_KEY {
+            let server_key : packet::PacketKey = serde_json::from_slice(data)?;
+            let server_key = RsaPublicKey::new(
+                BigUint::from_str(&server_key.n)?,
+                BigUint::from_str(&server_key.e)?,
+            )?;
+            self.server_key = Some(Box::leak(Box::new(server_key)));
+            return Ok(());
+        }
+        let dec_data = key
+        .pri_key
+        .decrypt(PaddingScheme::PKCS1v15Encrypt, data)?;
         match cmd {
-            header::EXCHANGE_KEY => {
-                let server_key : packet::PacketKey = serde_json::from_slice(data)
-                .expect("decrypt failed decryption error");
-                let server_key = RsaPublicKey::new(
-                    BigUint::from_str(&server_key.n).expect("key format"),
-                    BigUint::from_str(&server_key.e).expect("key format"),
-                )
-                .expect("key format");
-                self.server_key = Some(Box::leak(Box::new(server_key)));
-                
-                // match key.pri_key.decrypt(PaddingScheme::PKCS1v15Encrypt, data) {
-                //     Ok(data) => match String::from_utf8(data) {
-                //         Ok(ret) => {
-                //             let server_key: packet::PacketKey =
-                //                 serde_json::from_str(ret.as_str()).expect("err format json");
-                //             let server_key = RsaPublicKey::new(
-                //                 BigUint::from_str(&server_key.n).expect("key format"),
-                //                 BigUint::from_str(&server_key.e).expect("key format"),
-                //             )
-                //             .expect("key format");
-                //             self.server_key = Some(Box::leak(Box::new(server_key)));
-                //             info!("get the server key successfully");
-                //         }
-                //         Err(e) => {
-                //             error!("not utf-8 msg :{:#?}", e);
-                //             return;
-                //         }
-                //     },
-                //     Err(e) => {
-                //         error!("decrypt failed {}", e);
-                //         return;
-                //     }
-                // };
-            }
             header::NEW_CONNECTION => {
-                let dec_data = key
-                    .pri_key
-                    .decrypt(PaddingScheme::PKCS1v15Encrypt, data)
-                    .expect("error dec data");
-                let js = serde_json::from_slice::<packet::NewConnection>(&dec_data)
-                    .expect("err js format");
+                let js = serde_json::from_slice::<packet::NewConnection>(&dec_data)?;
                 self.handle_new_connection(js);
+            }
+            header::HEARTBEAT => {
+                let js = serde_json::from_slice::<packet::HeartBeat>(&dec_data)?;
+                let time = chrono::Local::now();
+                time.to_string();
             }
             _ => {}
         }
-        // match String::from_utf8(data.to_owned()) {
-        //     Ok(ret) => js = ret,
-        //     Err(e) => {
-        //         error!("not utf-8 msg :{:#?}", e);
-        //         return;
-        //     }
-        // }
-        // match serde_json::from_str::<Value>(js.as_str()) {
-        //     Ok(value) => {
-        //         Robot::handle_json_data(&value);
-        //     }
-        //     Err(e) => {
-        //         error!("wrong Json format :{:#?}", e);
-        //         return;
-        //     }
-        // }
+
+        Ok(())
     }
 
-    // fn handle_json_data(js: &Value) {
-    //     if let Some(obj) = js.as_object() {
-    //         if let Some(value) = obj.get("cmd") {
-    //             if let Some(cmd_type) = value.as_str() {
-    //                 match cmd_type {
-    //                     "new_connection" => {
-    //                         if let Some(info) = obj.get("detail") {
-    //                             match serde_json::from_value::<ConnectionInfo>(info.to_owned()) {
-    //                                 Ok(info) => {
-    //                                     // Robot::handle_new_connection(&info);
-    //                                 }
-    //                                 Err(e) => {
-    //                                     error!("error Json format {:#?}", e)
-    //                                 }
-    //                             }
-    //                         }
-    //                     }
-    //                     _ => {}
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
     fn handle_new_connection(&self, detail: NewConnection) {
         if detail.procotol == "tcp" {
             let port = detail.port;
@@ -307,7 +250,7 @@ impl Robot {
             });
         }
     }
-    async fn exchange_key(&mut self) -> io::Result<()> {
+    async fn exchange_key(&mut self) -> Result<(), LtwError> {
         debug!("start sending key");
         self.send_key().await?;
         debug!("send_key finish");
@@ -319,13 +262,11 @@ impl Robot {
                 let mut buf = vec![0; ret.get_size() as usize];
                 let size = socket.read_exact(&mut buf).await?;
                 // socket.read
-                self.handle_raw_data(&buf[0..size], ret.get_cmd());
+                self.handle_raw_data(&buf[0..size], ret.get_cmd())
             }
 
-            _ => return Err(io::Error::from(io::ErrorKind::InvalidData)),
-        };
-
-        Ok(())
+            _ => Err(LtwError::from(io::Error::from(io::ErrorKind::InvalidData))),
+        }
     }
     async fn send_listen_ports(&mut self) -> io::Result<usize> {
         let conf = Config::get_config(None);
@@ -391,6 +332,8 @@ impl Robot {
         
         info!("start successfully");
 
+        // let times = 
+
         loop {
             match self.read_pakcet().await {
                 Ok(data) => {
@@ -398,7 +341,13 @@ impl Robot {
                         self.reconnect().await;
                     }
 
-                    self.handle_raw_data(&data.0, data.1);
+                    if let Err(e) = self.handle_raw_data(&data.0, data.1) {
+                        if e.need_to_shut_down() {
+                            break;
+                        } else {
+                            self.reconnect().await;
+                        }
+                    }
                 }
                 Err(e) => {
                     error!("read error reconnecting {}", e);
