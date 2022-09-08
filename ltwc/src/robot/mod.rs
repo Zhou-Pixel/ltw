@@ -5,7 +5,7 @@ use std::io;
 use std::str::FromStr;
 use ltwr::error::LtwError;
 use rsa::{BigUint, PaddingScheme, PublicKey, PublicKeyParts, RsaPublicKey};
-use tokio::time::{self, Duration, interval};
+use tokio::time::{self, Duration, Instant, interval_at};
 use ltwr::packet;
 use ltwr::packet::header::ToHeader;
 use ltwr::packet::header::{self, Header};
@@ -333,10 +333,11 @@ impl Robot {
             return;
         }
         
-        info!("start successfully");
+        debug!("==================start successfully============================");
 
         // let times = 
-        let mut heartbeat_timer = interval(Duration::from_secs(10));
+        let mut heartbeat_timer = interval_at(Instant::now().
+        checked_add(Duration::from_secs(10)).unwrap(), Duration::from_secs(10));
         let mut times = 0;
         heartbeat_timer.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
@@ -359,8 +360,9 @@ impl Robot {
                             }
                         }
                         Err(e) => {
-                            error!("read error reconnecting {}", e);
-                            self.reconnect().await;
+                            error!("read error reconnecting {:#?}", e);
+                            // self.reconnect().await;
+                            break;
                         }
                     };
                 },

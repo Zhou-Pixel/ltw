@@ -23,7 +23,7 @@ use ltwr::packet;
 use packet::PacketKey;
 use rsa::*;
 use tokio::sync::{mpsc, RwLock};
-use tokio::time::{self, interval, Duration};
+use tokio::time::{self, Instant, Duration, interval_at};
 pub struct Manager {
     ports: Arc<RwLock<Vec<PortInfo>>>,
     list: Arc<RwLock<Vec<RecverInfo>>>,
@@ -230,7 +230,7 @@ impl Robot {
     }
 
     async fn read_pakcet(&mut self) -> io::Result<(Vec<u8>, u32)> {
-        debug!("read_packet --");
+        debug!("read_packet start");
         let streamer = &mut self.socket;
         let data = streamer.read_u64().await?;
         let mut buf = vec![0; data.get_size() as usize];
@@ -238,8 +238,8 @@ impl Robot {
             warn!("not enough data");
         }
 
-        debug!("read_packet");
-
+        debug!("read_packet end");
+        debug!("cmd {}", data.get_cmd());
         Ok((buf, data.get_cmd()))
     }
     async fn send_key(&mut self) -> io::Result<()> {
@@ -274,7 +274,8 @@ impl Robot {
             debug!("new client join list");
 
             let mut to_connect_socket: Vec<NewConnection> = Vec::new();
-            let mut heartbeat_timer = interval(Duration::from_secs(60));
+            let mut heartbeat_timer = interval_at(Instant::now()
+            .checked_add(Duration::from_secs(60)).unwrap(), Duration::from_secs(60));
             heartbeat_timer.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
             loop {
@@ -299,6 +300,7 @@ impl Robot {
 
                     _ = heartbeat_timer.tick() => {
                         if self.heartbeat < 5 {
+                            debug!("client time_out");
                             break;
                         } else {
                             self.heartbeat = 0;
@@ -510,10 +512,13 @@ impl Robot {
             //     Err(_) => return Err(io::Error::from(io::ErrorKind::InvalidData)),
             // },
             header::HEARTBEAT => {
-                let js = serde_json::from_slice::<packet::Heartbeat>(&dec_data)?;
+                let mut js = serde_json::from_slice::<packet::Heartbeat>(&dec_data)?;
                 let time = Local::now().timestamp_millis();
                 if (js.time - time).abs() < 2 * 1000 {
                     self.heartbeat += 1;
+                    js.time = time;
+                    let data = serde_json::to_vec(&js)?;
+                    self.send_data(header::HEARTBEAT, &data).await?;
                 }
             },
             _ => {}
