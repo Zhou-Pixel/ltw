@@ -4,6 +4,7 @@ use log::*;
 use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufStream};
 use tokio::net;
+use ltwr::packet::BUFSIZE;
 // use std::io::Bytes::BytesMut;
 
 pub struct TcpTask {
@@ -42,14 +43,14 @@ impl TcpTask {
                 use crate::config::Config;
                 let conf = Config::get_config(None);
                 let addr = conf.global.remote_ip.clone() + ":" + &conf.global.bind_port.to_string();
-                Ok(BufStream::new(net::TcpStream::connect(&addr).await?))
+                Ok(BufStream::with_capacity(BUFSIZE, BUFSIZE, net::TcpStream::connect(&addr).await?))
                 // self.remote_addr = addr;
             }
         }
         // self.real_port = Some(net::TcpStream::connect(addr).await?);
     }
     async fn connect_to_real_port(addr: &str) -> io::Result<Streamer> {
-        Ok(BufStream::new(net::TcpStream::connect(addr).await?))
+        Ok(BufStream::with_capacity(BUFSIZE, BUFSIZE, net::TcpStream::connect(addr).await?))
     }
     pub async fn notify_server(&mut self, server_key: &rsa::RsaPublicKey) -> io::Result<()> {
         // let identify = "identify=recver||recv_port=".to_string() + &self.recv_port + "\r\n";

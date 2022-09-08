@@ -5,7 +5,7 @@ use std::io;
 use std::str::FromStr;
 use ltwr::error::LtwError;
 use rsa::{BigUint, PaddingScheme, PublicKey, PublicKeyParts, RsaPublicKey};
-
+use tokio::time::{self, Duration, interval};
 use ltwr::packet;
 use ltwr::packet::header::ToHeader;
 use ltwr::packet::header::{self, Header};
@@ -17,7 +17,7 @@ pub type Streamer = BufStream<TcpStream>;
 pub struct Robot {
     socket: Streamer,
     server_key: Option<&'static RsaPublicKey>,
-    
+    heartbeat : usize,
 }
 
 impl Robot {
@@ -26,6 +26,7 @@ impl Robot {
         let mut robot = Robot {
             socket,
             server_key: None,
+            heartbeat : 0
         };
         robot.send_identify().await?;
         Ok(robot)
@@ -134,7 +135,6 @@ impl Robot {
                     }
                     // let arr = [0u8; 8];
                     // let i = arr.as_ptr() as *mut u64;
-                    use std::time::Duration;
                     use tokio::time::sleep;
                     sleep(Duration::from_secs(time)).await;
                 }
@@ -143,7 +143,7 @@ impl Robot {
         // self.start().await;
     }
 
-    async fn send_encryptd_data(&mut self, data: &[u8], cmd: u32) -> io::Result<usize> {
+    async fn send_encryptd_data(&mut self, data: &[u8], cmd: u32) -> Result<usize, LtwError> {
         let enc_data;
 
         match self.server_key {
@@ -157,8 +157,7 @@ impl Robot {
                         &mut rand::thread_rng(),
                         PaddingScheme::PKCS1v15Encrypt,
                         data,
-                    )
-                    .expect("encrypt");
+                    )?;
                 self.send_raw_data(&enc_data, cmd).await?;
                 // let size = enc_data.len();
                 // self.socket
@@ -168,7 +167,7 @@ impl Robot {
                 //     .await?;
                 // self.socket.as_mut().unwrap().write_all(data).await?;
             }
-            None => return Err(io::Error::from(io::ErrorKind::Other)),
+            None => return Err(LtwError::UnkonwnError(None)),
         }
 
         Ok(enc_data.len())
@@ -205,9 +204,13 @@ impl Robot {
                 self.handle_new_connection(js);
             }
             header::HEARTBEAT => {
-                let js = serde_json::from_slice::<packet::HeartBeat>(&dec_data)?;
-                let time = chrono::Local::now();
-                time.to_string();
+                let js = serde_json::from_slice::<packet::Heartbeat>(&dec_data)?;
+                let time = Local::now();
+                if (time.timestamp_millis() - js.time).abs() < 2 * 1000 {
+                    self.heartbeat += 1;
+                } else {
+                    warn!("expired heartbeat");
+                }
             }
             _ => {}
         }
@@ -268,7 +271,7 @@ impl Robot {
             _ => Err(LtwError::from(io::Error::from(io::ErrorKind::InvalidData))),
         }
     }
-    async fn send_listen_ports(&mut self) -> io::Result<usize> {
+    async fn send_listen_ports(&mut self) -> Result<usize, LtwError> {
         let conf = Config::get_config(None);
 
         match conf.connection.as_ref() {
@@ -333,27 +336,62 @@ impl Robot {
         info!("start successfully");
 
         // let times = 
+        let mut heartbeat_timer = interval(Duration::from_secs(10));
+        let mut times = 0;
+        heartbeat_timer.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
+        
         loop {
-            match self.read_pakcet().await {
-                Ok(data) => {
-                    if data.1 == header::NOT_A_CMD || data.0.len() == 0 {
-                        self.reconnect().await;
-                    }
+            tokio::select! {
+                ret = self.read_pakcet() => {
+                    match ret {
+                        Ok(data) => {
+                            if data.1 == header::NOT_A_CMD || data.0.len() == 0 {
+                                self.reconnect().await;
+                            }
+        
+                            if let Err(e) = self.handle_raw_data(&data.0, data.1) {
+                                if e.need_to_shut_down() {
+                                    break;
+                                } else {
+                                    self.reconnect().await;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("read error reconnecting {}", e);
+                            self.reconnect().await;
+                        }
+                    };
+                },
 
-                    if let Err(e) = self.handle_raw_data(&data.0, data.1) {
+                _ = heartbeat_timer.tick() => {
+
+                    let js = packet::Heartbeat {  time : Local::now().timestamp_millis() };
+                    let js = serde_json::to_vec::<packet::Heartbeat>(&js).unwrap();
+                    if let Err(e) = self.send_encryptd_data(&js, header::HEARTBEAT).await {
                         if e.need_to_shut_down() {
                             break;
                         } else {
                             self.reconnect().await;
                         }
+                    } else {
+                        times += 1;
+                        if times == 10 {
+                            if self.heartbeat < 5 {
+                                self.reconnect().await;
+                            }
+                            self.heartbeat = 0;
+                            times = 0;
+                        }
                     }
+
                 }
-                Err(e) => {
-                    error!("read error reconnecting {}", e);
-                    self.reconnect().await;
-                }
-            };
+
+
+
+            }
+            
         }
 
     }

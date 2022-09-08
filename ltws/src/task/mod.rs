@@ -1,7 +1,6 @@
 use std::io::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use log::{error, debug};
-use tokio::time::{self, Duration};
+use log::*;
 use tokio::io::BufStream;
 use tokio::net::TcpStream;
 

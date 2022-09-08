@@ -1,5 +1,9 @@
 pub mod header;
 use serde::{Deserialize, Serialize};
+
+
+pub const BUFSIZE : usize = 1024 * 1024;
+
 #[derive(Deserialize, Serialize)]
 pub struct ConnectionInfo {
     pub procotol: String,
@@ -51,6 +55,6 @@ pub struct NewRecver {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct HeartBeat {
-    pub time : String,
+pub struct Heartbeat {
+    pub time : i64,
 }

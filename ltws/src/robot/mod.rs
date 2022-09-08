@@ -1,7 +1,7 @@
 use ltwr::packet::header::Header;
-use ltwr::packet::{ListenConnections, NewRecver, Password};
+use ltwr::packet::{ListenConnections, NewRecver, Password, BUFSIZE};
 use super::task::TcpTask;
-
+use ltwr::error::LtwError;
 use super::config::Config;
 use ltwr::packet::header;
 use header::ToHeader;
@@ -17,12 +17,13 @@ use tokio::{
     sync::watch,
 };
 pub type Streamer = BufStream<TcpStream>;
-
+use chrono::*;
 use super::config;
 use ltwr::packet;
 use packet::PacketKey;
 use rsa::*;
 use tokio::sync::{mpsc, RwLock};
+use tokio::time::{self, interval, Duration};
 pub struct Manager {
     ports: Arc<RwLock<Vec<PortInfo>>>,
     list: Arc<RwLock<Vec<RecverInfo>>>,
@@ -104,7 +105,7 @@ impl Manager {
         }
     }
 
-    fn identify(&self, socket: TcpStream) {
+    fn identify(&self, mut socket: TcpStream) {
         let ports_cloned = Arc::clone(&self.ports);
         let list_cloned = Arc::clone(&self.list);
         let watcher = self.watcher.0.subscribe();
@@ -112,28 +113,29 @@ impl Manager {
         let ports = Arc::clone(&self.ports);
         debug!("new clinet");
         tokio::spawn(async move {
-            let mut buf_streamer = BufStream::new(socket);
+            // let mut buf_streamer = BufStream::new(socket);
             debug!("a new client is reading");
-            match buf_streamer.read_u64().await {
+            match socket.read_u64().await {
                 Ok(data) => {
                     debug!("cmd : {}", data.get_cmd());
                     if data.get_cmd() == header::ID_ROBOT {
                         info!("new robot");
-                        Robot {
-                            all_ports: ports_cloned,
-                            my_ports: Vec::new(),
-                            socket: buf_streamer,
-                            list: list_cloned,
-                            client_key: None,
-                            channel: mpsc::unbounded_channel::<NewConnection>(),
-                            recver: watcher,
-                        }
-                        .start();
+                        Robot::new(ports_cloned, BufStream::new(socket), list_cloned, watcher).start();
+                        // Robot {
+                        //     all_ports: ports_cloned,
+                        //     my_ports: Vec::new(),
+                        //     socket: buf_streamer,
+                        //     list: list_cloned,
+                        //     client_key: None,
+                        //     channel: mpsc::unbounded_channel::<NewConnection>(),
+                        //     recver: watcher,
+                        // }
+                        // .start();
                         info!("new Robor");
                     } else if data.get_cmd() == header::ID_RECVER {
                         debug!("new recver");
                         let mut buf = vec![0; data.get_size() as usize];
-                        match buf_streamer.read_exact(&mut buf).await {
+                        match socket.read_exact(&mut buf).await {
                             Ok(size) => {
                                 if size != buf.len() || size == 0 {
                                     return;
@@ -159,12 +161,11 @@ impl Manager {
                                 if !ports
                                     .read()
                                     .await
-                                    .contains(&PortInfo::new(js.port, js.procotol.clone()))
-                                {
+                                    .contains(&PortInfo::new(js.port, js.procotol.clone())) {
                                     return;
                                 }
                                 list_cloned.write().await.push(RecverInfo {
-                                    socket: buf_streamer,
+                                    socket: BufStream::with_capacity(BUFSIZE, BUFSIZE, socket),
                                     port: js.port,
                                     protocol: js.procotol.clone(),
                                     rnum: js.rnum,
@@ -206,6 +207,7 @@ pub struct Robot {
         mpsc::UnboundedReceiver<NewConnection>,
     ),
     recver: watch::Receiver<PortInfo>,
+    heartbeat : usize,
 }
 
 impl Robot {
@@ -223,6 +225,7 @@ impl Robot {
             client_key: None,
             channel: mpsc::unbounded_channel::<NewConnection>(),
             recver,
+            heartbeat : 0,
         }
     }
 
@@ -271,6 +274,8 @@ impl Robot {
             debug!("new client join list");
 
             let mut to_connect_socket: Vec<NewConnection> = Vec::new();
+            let mut heartbeat_timer = interval(Duration::from_secs(60));
+            heartbeat_timer.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
             loop {
                 tokio::select! {
@@ -289,6 +294,14 @@ impl Robot {
                                 error!("read {}", e);
                                 break;
                             },
+                        }
+                    },
+
+                    _ = heartbeat_timer.tick() => {
+                        if self.heartbeat < 5 {
+                            break;
+                        } else {
+                            self.heartbeat = 0;
                         }
                     },
 
@@ -351,35 +364,44 @@ impl Robot {
     }
 
     //验证密码
-    async fn verify_password(&mut self) -> io::Result<()> {
+    async fn verify_password(&mut self) -> Result<(), LtwError> {
         let buf_steamer = &mut self.socket;
         let data = buf_steamer.read_u64().await?;
-        let err = Err(io::Error::from(io::ErrorKind::Other));
+        // let err = Err(io::Error::from(io::ErrorKind::Other));
 
         if data.get_cmd() == header::PASSWORD {
             let mut buf = vec![0; data.get_size() as usize];
             let size = buf_steamer.read_exact(&mut buf).await?;
-            match config::RSAKey::get_key()
+            let dec_data = config::RSAKey::get_key()
                 .pri_key
-                .decrypt(PaddingScheme::PKCS1v15Encrypt, &buf[0..size])
-            {
-                Ok(dec_data) => match serde_json::from_slice::<Password>(&dec_data) {
-                    Ok(data) => {
-                        if data.password == Config::get_config(None).global.password {
-                            Ok(())
-                        } else {
-                            err
-                        }
-                    }
-                    Err(_) => err,
-                },
-                Err(e) => {
-                    warn!("unknown host is connecting to this sever {}", e);
-                    err
+                .decrypt(PaddingScheme::PKCS1v15Encrypt, &buf[0..size])?;
+
+                let passwd = serde_json::from_slice::<Password>(&dec_data)?;
+
+                if passwd.password == Config::get_config(None).global.password {
+                    Ok(())
+                } else {
+                    Err(LtwError::WrongPoassword)
                 }
-            }
+
+            // {
+            //     Ok(dec_data) => match serde_json::from_slice::<Password>(&dec_data) {
+            //         Ok(data) => {
+            //             if data.password == Config::get_config(None).global.password {
+            //                 Ok(())
+            //             } else {
+            //                 err
+            //             }
+            //         }
+            //         Err(_) => err,
+            //     },
+            //     Err(e) => {
+            //         warn!("unknown host is connecting to this sever {}", e);
+            //         err
+            //     }
+            // }
         } else {
-            err
+            Err(LtwError::UnkonwnError(Some("Wrong Command".to_string())))
         }
     }
     async fn wait_for_key(&mut self) -> io::Result<()> {
@@ -422,17 +444,13 @@ impl Robot {
         }
     }
 
-    async fn handle_raw_data(&mut self, cmd: u32, data: &[u8]) -> io::Result<()> {
+    async fn handle_raw_data(&mut self, cmd: u32, data: &[u8]) -> Result<(), LtwError> {
         let key = &config::RSAKey::get_key().pri_key;
-        let dec_data = match key.decrypt(PaddingScheme::PKCS1v15Encrypt, data) {
-            Ok(dec_data) => dec_data,
-            Err(_) => return Err(io::Error::from(io::ErrorKind::InvalidData)),
-        };
-
+        let dec_data = key.decrypt(PaddingScheme::PKCS1v15Encrypt, data)?;
         match cmd {
-            header::LTWC_PORTS => match serde_json::from_slice::<ListenConnections>(&dec_data) {
-                Ok(mut connections) => {
-                    info!("start");
+            header::LTWC_PORTS => {
+                let mut connections = serde_json::from_slice::<ListenConnections>(&dec_data)?;
+                info!("start");
                     {
                         let mut v = self.all_ports.write().await; //很容易造成死锁， 待优化
                         connections.connections.retain(|i| {
@@ -463,29 +481,40 @@ impl Robot {
                         }
                     }
                     info!("end");
-                    // for j in 0..connections.connections.len() {
-                    //     let mut is_used = false;
-                    //     for i in 0..v.len() {
-                    //         if v[i].0 == connections.connections[j].port
-                    //             && v[i].1 == connections.connections[i].procotol
-                    //         {
-                    //             is_used = true;
-                    //             break;
-                    //         }
-                    //     }
-                    //     if !is_used {
-                    //         match connections.connections[j].procotol.as_str() {
-                    //             "tcp" => {
-                    //                 let port = connections.connections[j].port;
-                    //                 TListener{sender : self.channel.0.clone(), port}.start();
-                    //                 v.push((port, "tcp".to_string()));
-                    //             },
-                    //             _ => {}
-                    //         }
-                    //     }
-                    // }
+            }
+            // match serde_json::from_slice::<ListenConnections>(&dec_data) {
+            //     Ok(mut connections) => {
+                    
+            //         // for j in 0..connections.connections.len() {
+            //         //     let mut is_used = false;
+            //         //     for i in 0..v.len() {
+            //         //         if v[i].0 == connections.connections[j].port
+            //         //             && v[i].1 == connections.connections[i].procotol
+            //         //         {
+            //         //             is_used = true;
+            //         //             break;
+            //         //         }
+            //         //     }
+            //         //     if !is_used {
+            //         //         match connections.connections[j].procotol.as_str() {
+            //         //             "tcp" => {
+            //         //                 let port = connections.connections[j].port;
+            //         //                 TListener{sender : self.channel.0.clone(), port}.start();
+            //         //                 v.push((port, "tcp".to_string()));
+            //         //             },
+            //         //             _ => {}
+            //         //         }
+            //         //     }
+            //         // }
+            //     }
+            //     Err(_) => return Err(io::Error::from(io::ErrorKind::InvalidData)),
+            // },
+            header::HEARTBEAT => {
+                let js = serde_json::from_slice::<packet::Heartbeat>(&dec_data)?;
+                let time = Local::now().timestamp_millis();
+                if (js.time - time).abs() < 2 * 1000 {
+                    self.heartbeat += 1;
                 }
-                Err(_) => return Err(io::Error::from(io::ErrorKind::InvalidData)),
             },
             _ => {}
         }

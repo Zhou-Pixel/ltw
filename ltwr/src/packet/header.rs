@@ -10,6 +10,7 @@ pub trait Header {
     fn get_cmd(&self) -> u32;
     fn get_size(&self) -> u32;
 }
+
 //lower 4 bit is size or additional info,
 // heigher 4 bit is cmd
 impl Header for u64 {
